@@ -13,6 +13,16 @@ pub struct PointProj {
     pub z: f2elm_t,
 }
 
+impl PointProj {
+    pub fn new() -> PointProj {
+        PointProj {
+            x: [[0u64; 12]; 2],
+            z: [[0u64; 12]; 2],
+        }
+    }
+}
+
+const LOG2RADIX: usize = 6;
 const RADIX: usize = 64;
 const NWORDS_FIELD: usize = 12;
 

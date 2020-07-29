@@ -1,6 +1,6 @@
 use crate::util::{addc, mul, subc};
 
-pub fn fpadd751(a: &[u64], b: &[u64], c: &mut [u64]) {
+pub fn fpadd(a: &[u64], b: &[u64], c: &mut [u64]) {
     let mut carry: u32 = 0;
 
     for i in 0..12 {
@@ -22,7 +22,7 @@ pub fn fpadd751(a: &[u64], b: &[u64], c: &mut [u64]) {
     }
 }
 
-pub fn fpsub751(a: &[u64], b: &[u64], c: &mut [u64]) {
+pub fn fpsub(a: &[u64], b: &[u64], c: &mut [u64]) {
     let mut borrow: u32 = 0;
 
     for i in 0..12 {
@@ -43,7 +43,7 @@ pub fn fpsub751(a: &[u64], b: &[u64], c: &mut [u64]) {
     }
 }
 
-pub fn fpneg751(a: &mut [u64]) {
+pub fn fpneg(a: &mut [u64]) {
     let mut borrow: u32 = 0;
 
     for i in 0..12 {
@@ -51,7 +51,7 @@ pub fn fpneg751(a: &mut [u64]) {
     }
 }
 
-pub fn fpdiv2_751(a: &[u64], c: &mut [u64]) {
+pub fn fpdiv2(a: &[u64], c: &mut [u64]) {
     let mut carry: u32 = 0;
     let mask = (0 as u64).wrapping_sub(a[0] & 1 as u64);
 
@@ -62,7 +62,7 @@ pub fn fpdiv2_751(a: &[u64], c: &mut [u64]) {
     crate::fpx::mp_shiftr1(c, 12);
 }
 
-pub fn fpcorrection751(a: &mut [u64]) {
+pub fn fpcorrection(a: &mut [u64]) {
     let mut borrow: u32 = 0;
 
     for i in 0..12 {
@@ -291,23 +291,14 @@ pub mod tests {
             crate::util::fillbytes_u64(&mut [&mut a, &mut b]);
 
             unsafe {
-                crate::fp_generic::fpadd751(&a, &b, &mut c);
-                fpadd751(a.as_ptr(), b.as_ptr(), d.as_mut_ptr());
+                crate::fp_generic::fpadd(&a, &b, &mut c);
+                fpadd(a.as_ptr(), b.as_ptr(), d.as_mut_ptr());
                 assert_eq!(c, d);
             }
 
             unsafe {
-                crate::fp_generic::fpsub751(&a, &b, &mut c);
-                fpsub751(a.as_ptr(), b.as_ptr(), d.as_mut_ptr());
-                assert_eq!(c, d);
-            }
-
-            unsafe {
-                c = a;
-                d = a;
-
-                crate::fp_generic::fpneg751(&mut c);
-                fpneg751(d.as_mut_ptr());
+                crate::fp_generic::fpsub(&a, &b, &mut c);
+                fpsub(a.as_ptr(), b.as_ptr(), d.as_mut_ptr());
                 assert_eq!(c, d);
             }
 
@@ -315,8 +306,30 @@ pub mod tests {
                 c = a;
                 d = a;
 
-                crate::fp_generic::fpcorrection751(&mut c);
-                fpcorrection751(d.as_mut_ptr());
+                crate::fp_generic::fpneg(&mut c);
+                fpneg(d.as_mut_ptr());
+                assert_eq!(c, d);
+            }
+
+            unsafe {
+                let mut a = [0u64; 12];
+                let mut b = [0u64; 12];
+                let mut c = [0u64; 12];
+
+                crate::util::fillbytes_u64(&mut [&mut a]);
+
+                crate::fp_generic::fpdiv2(&a, &mut b);
+                fpdiv2(a.as_ptr(), c.as_mut_ptr());
+
+                assert_eq!(b, c);
+            }
+
+            unsafe {
+                c = a;
+                d = a;
+
+                crate::fp_generic::fpcorrection(&mut c);
+                fpcorrection(d.as_mut_ptr());
                 assert_eq!(c, d);
             }
 
@@ -358,7 +371,7 @@ pub mod tests {
         }
     }
 
-    pub unsafe extern "C" fn fpadd751(
+    pub unsafe extern "C" fn fpadd(
         mut a: *const digit_t,
         mut b: *const digit_t,
         mut c: *mut digit_t,
@@ -410,7 +423,7 @@ pub mod tests {
         }
     }
 
-    pub unsafe extern "C" fn fpsub751(
+    pub unsafe extern "C" fn fpsub(
         mut a: *const digit_t,
         mut b: *const digit_t,
         mut c: *mut digit_t,
@@ -450,7 +463,7 @@ pub mod tests {
         }
     }
 
-    pub unsafe extern "C" fn fpneg751(mut a: *mut digit_t) {
+    pub unsafe extern "C" fn fpneg(mut a: *mut digit_t) {
         // Modular negation, a = -a mod p751.
         // Input/output: a in [0, 2*p751-1]
         let mut i: libc::c_uint = 0;
@@ -471,7 +484,33 @@ pub mod tests {
         }
     }
 
-    pub unsafe extern "C" fn fpcorrection751(mut a: *mut digit_t) {
+    #[no_mangle]
+    pub unsafe extern "C" fn fpdiv2(mut a: *const digit_t, mut c: *mut digit_t) {
+        // Modular division by two, c = a/2 mod p751.
+        // Input : a in [0, 2*p751-1]
+        // Output: c in [0, 2*p751-1]
+        let mut i: libc::c_uint = 0; // If a is odd compute a+p751
+        let mut carry: libc::c_uint = 0 as libc::c_int as libc::c_uint;
+        let mut mask: digit_t = 0;
+        mask = (0 as libc::c_int as libc::c_ulong)
+            .wrapping_sub(*a.offset(0 as libc::c_int as isize) & 1 as libc::c_int as libc::c_ulong);
+        i = 0 as libc::c_int as libc::c_uint;
+        while i < 12 as libc::c_int as libc::c_uint {
+            let mut tempReg: uint128_t = (*a.offset(i as isize) as uint128_t)
+                .wrapping_add(
+                    (*(crate::p751.as_ptr() as *mut digit_t).offset(i as isize) & mask)
+                        as uint128_t,
+                )
+                .wrapping_add(carry as uint128_t);
+            carry = (tempReg >> 64 as libc::c_int) as digit_t as libc::c_uint;
+            *c.offset(i as isize) = tempReg as digit_t;
+            i = i.wrapping_add(1)
+        }
+
+        crate::fpx::tests::mp_shiftr1(c, 12);
+    }
+
+    pub unsafe extern "C" fn fpcorrection(mut a: *mut digit_t) {
         // Modular correction to reduce field element a in [0, 2*p751-1] to [0, p751-1].
         let mut i: libc::c_uint = 0;
         let mut borrow: libc::c_uint = 0 as libc::c_int as libc::c_uint;
