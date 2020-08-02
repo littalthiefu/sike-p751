@@ -1,5 +1,47 @@
 use crate::util::{addc, mul, subc};
 
+pub fn fpaddx(a: *const u64, b: *const u64, c: &mut [u64]) {
+    unsafe {
+        let mut carry: u32 = 0;
+
+        for i in 0..12 {
+            addc(
+                carry,
+                *a.offset(i),
+                *b.offset(i),
+                &mut carry,
+                &mut c[i as usize],
+            );
+        }
+
+        carry = 0;
+
+        for i in 0..12 {
+            subc(
+                carry,
+                c[i],
+                crate::p751x2[i as usize],
+                &mut carry,
+                &mut c[i],
+            );
+        }
+
+        let mask = (0 as u64).wrapping_sub(carry as u64);
+
+        carry = 0;
+
+        for i in 0..12 {
+            addc(
+                carry,
+                c[i],
+                crate::p751x2[i as usize] & mask,
+                &mut carry,
+                &mut c[i],
+            );
+        }
+    }
+}
+
 pub fn fpadd(a: &[u64], b: &[u64], c: &mut [u64]) {
     let mut carry: u32 = 0;
 
@@ -19,6 +61,35 @@ pub fn fpadd(a: &[u64], b: &[u64], c: &mut [u64]) {
 
     for i in 0..12 {
         addc(carry, c[i], crate::p751x2[i] & mask, &mut carry, &mut c[i]);
+    }
+}
+
+pub fn fpsubx(a: *const u64, b: *const u64, c: &mut [u64]) {
+    unsafe {
+        let mut borrow: u32 = 0;
+
+        for i in 0..12 {
+            subc(
+                borrow,
+                *a.offset(i),
+                *b.offset(i),
+                &mut borrow,
+                &mut c[i as usize],
+            );
+        }
+
+        let mask = (0 as u64).wrapping_sub(borrow as u64);
+        borrow = 0;
+
+        for i in 0..12 {
+            addc(
+                borrow,
+                c[i],
+                crate::p751x2[i] & mask,
+                &mut borrow,
+                &mut c[i],
+            );
+        }
     }
 }
 
@@ -275,9 +346,7 @@ pub fn rdc_mont(ma: &[u64], mc: &mut [u64]) {
 
 #[cfg(test)]
 pub mod tests {
-    pub type uint64_t = libc::c_ulong;
-    pub type digit_t = uint64_t;
-    pub type uint128_t = u128;
+    use crate::*;
 
     #[test]
     fn test_fp_generic() {

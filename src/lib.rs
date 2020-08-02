@@ -1,11 +1,24 @@
 mod ec_isogeny;
 mod fp_generic;
 mod fpx;
+mod sidh;
 mod util;
 
+use std::convert::From;
+
+type uint64_t = libc::c_ulong;
+type uint128_t = u128;
+type digit_t = uint64_t;
 type felm_t = [u64; 12];
 type f2elm_t = [felm_t; 2];
 type dfelm_t = [u64; 24];
+
+const felm: felm_t = [0u64; 12];
+const f2elm: f2elm_t = [felm; 2];
+
+struct F2ELM([u8; 192]);
+struct U64(Vec<u64>);
+struct PointProjRaw([u64; 48]);
 
 #[derive(Copy, Clone)]
 pub struct PointProj {
@@ -22,19 +35,119 @@ impl PointProj {
     }
 }
 
+type point_proj_t = [point_proj; 1];
+
+#[derive(Copy, Clone)]
+pub struct point_proj {
+    X: f2elm_t,
+    Z: f2elm_t,
+}
+
+impl From<PointProj> for PointProjRaw {
+    fn from(a: PointProj) -> PointProjRaw {
+        let mut array = [0u64; 48];
+
+        array[..12].clone_from_slice(&a.x[0]);
+        array[12..24].clone_from_slice(&a.x[1]);
+        array[24..36].clone_from_slice(&a.z[0]);
+        array[36..48].clone_from_slice(&a.z[1]);
+
+        PointProjRaw(array)
+    }
+}
+
+impl From<[u64; 48]> for PointProj {
+    fn from(a: [u64; 48]) -> PointProj {
+        let mut point = PointProj::new();
+
+        point.x[0].clone_from_slice(&a[..12]);
+        point.x[1].clone_from_slice(&a[12..24]);
+        point.z[0].clone_from_slice(&a[24..36]);
+        point.z[1].clone_from_slice(&a[36..48]);
+
+        point
+    }
+}
+
+impl From<f2elm_t> for F2ELM {
+    fn from(a: f2elm_t) -> F2ELM {
+        let mut array = [0u8; 192];
+        let mut j = 0;
+
+        for i in a.iter() {
+            for i in i.iter() {
+                let a = i.to_ne_bytes();
+                array[j] = a[0];
+                array[j + 1] = a[1];
+                array[j + 2] = a[2];
+                array[j + 3] = a[3];
+                array[j + 4] = a[4];
+                array[j + 5] = a[5];
+                array[j + 6] = a[6];
+                array[j + 7] = a[7];
+
+                j += 8;
+            }
+        }
+
+        F2ELM(array)
+    }
+}
+
+impl From<F2ELM> for f2elm_t {
+    fn from(a: F2ELM) -> f2elm_t {
+        let mut array = [[0u64; 12]; 2];
+        let mut i = 0;
+        let mut k = 0;
+
+        for j in (0..a.0.len()).step_by(8) {
+            let mut byte = [0u8; 8];
+            byte.clone_from_slice(&a.0[j..j + 8]);
+
+            array[k][i] = u64::from_ne_bytes(byte);
+
+            i += 1;
+
+            if i == 12 && k != 1 {
+                i = 0;
+                k = 1;
+            } else if i == 12 && k == 1 {
+                break;
+            }
+        }
+
+        array
+    }
+}
+
+impl From<&[u8]> for U64 {
+    fn from(a: &[u8]) -> U64 {
+        let mut array = Vec::new();
+
+        for j in (0..a.len()).step_by(8) {
+            let mut byte = [0u8; 8];
+            byte.clone_from_slice(&a[j..j + 8]);
+
+            array.push(u64::from_ne_bytes(byte));
+        }
+
+        U64(array)
+    }
+}
+
 const LOG2RADIX: usize = 6;
 const RADIX: usize = 64;
 const NWORDS_FIELD: usize = 12;
 
 const NBITS_FIELD: usize = 751;
 const MAXBITS_FIELD: usize = 768;
-const MAXWORDS_FIELD: usize = ((MAXBITS_FIELD + RADIX - 1) / RADIX);
-const NWORDS64_FIELD: usize = ((NBITS_FIELD + 63) / 64);
+const MAXWORDS_FIELD: usize = (MAXBITS_FIELD + RADIX - 1) / RADIX;
+const NWORDS64_FIELD: usize = (NBITS_FIELD + 63) / 64;
 const NBITS_ORDER: usize = 384;
-const NWORDS_ORDER: usize = ((NBITS_ORDER + RADIX - 1) / RADIX);
-const NWORDS64_ORDER: usize = ((NBITS_ORDER + 63) / 64);
+const NWORDS_ORDER: usize = (NBITS_ORDER + RADIX - 1) / RADIX;
+const NWORDS64_ORDER: usize = (NBITS_ORDER + 63) / 64;
 const MAXBITS_ORDER: usize = NBITS_ORDER;
-const MAXWORDS_ORDER: usize = ((MAXBITS_ORDER + RADIX - 1) / RADIX);
+const MAXWORDS_ORDER: usize = (MAXBITS_ORDER + RADIX - 1) / RADIX;
 const ALICE: usize = 0;
 const BOB: usize = 1;
 const OALICE_BITS: usize = 372;

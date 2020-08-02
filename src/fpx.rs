@@ -19,6 +19,14 @@ pub fn copy_words(a: &[u64], c: &mut [u64], nwords: usize) {
     }
 }
 
+pub fn copy_words_x(a: *const u64, c: *mut u64, nwords: usize) {
+    for i in 0..nwords as isize {
+        unsafe {
+            *c.offset(i) = *a.offset(i);
+        }
+    }
+}
+
 pub fn fpmul_mont(ma: &felm_t, mb: &felm_t, mc: &mut felm_t) {
     let mut temp = [0u64; 24];
 
@@ -43,7 +51,6 @@ pub fn fpinv_mont(a: &mut felm_t) {
     fpsqr_mont(&temp, &mut tt);
     temp = *a;
     fpmul_mont(&temp, &tt, a);
-    todo!();
 }
 
 pub fn fp2copy(a: &f2elm_t, c: &mut f2elm_t) {
@@ -66,9 +73,23 @@ pub fn fp2add(a: &f2elm_t, b: &f2elm_t, c: &mut f2elm_t) {
     crate::fp_generic::fpadd(&a[1], &b[1], &mut c[1]);
 }
 
+pub fn fp2addx(a: *const felm_t, b: *const felm_t, c: &mut f2elm_t) {
+    unsafe {
+        crate::fp_generic::fpaddx((*a).as_ptr(), (*b).as_ptr(), &mut c[0]);
+        crate::fp_generic::fpaddx((*a.offset(1)).as_ptr(), (*b.offset(1)).as_ptr(), &mut c[1]);
+    }
+}
+
 pub fn fp2sub(a: &f2elm_t, b: &f2elm_t, c: &mut f2elm_t) {
     crate::fp_generic::fpsub(&a[0], &b[0], &mut c[0]);
     crate::fp_generic::fpsub(&a[1], &b[1], &mut c[1]);
+}
+
+pub fn fp2subx(a: *const felm_t, b: *const felm_t, c: &mut f2elm_t) {
+    unsafe {
+        crate::fp_generic::fpsubx((*a).as_ptr(), (*b).as_ptr(), &mut c[0]);
+        crate::fp_generic::fpsubx((*a.offset(1)).as_ptr(), (*b.offset(1)).as_ptr(), &mut c[1]);
+    }
 }
 
 pub fn fp2div2(a: &f2elm_t, c: &mut f2elm_t) {
@@ -96,6 +117,20 @@ pub fn fp2sqr_mont(a: &f2elm_t, c: &mut f2elm_t) {
     fpmul_mont(&t3, &a[1], &mut c[1]);
 }
 
+pub fn fp2sqr_montx(a: *const felm_t, c: &mut f2elm_t) {
+    unsafe {
+        let mut t1 = [0u64; 12];
+        let mut t2 = [0u64; 12];
+        let mut t3 = [0u64; 12];
+
+        mp_addfast(&*a, &*a.offset(1), &mut t1);
+        crate::fp_generic::fpsub(&*a, &*a.offset(1), &mut t2);
+        mp_addfast(&*a, &*a, &mut t3);
+        fpmul_mont(&t1, &t2, &mut c[0]);
+        fpmul_mont(&t3, &*a.offset(1), &mut c[1]);
+    }
+}
+
 pub fn mp_sub(a: &[u64], b: &[u64], c: &mut [u64], nwords: usize) -> u32 {
     let mut borrow = 0;
 
@@ -107,7 +142,7 @@ pub fn mp_sub(a: &[u64], b: &[u64], c: &mut [u64], nwords: usize) -> u32 {
 }
 
 pub fn mp_subfast(a: &[u64], b: &[u64], c: &mut [u64]) -> u64 {
-    0 - mp_sub(a, b, c, 24) as u64
+    (0 as u64).wrapping_sub(mp_sub(a, b, c, 2 * crate::NWORDS_FIELD) as u64)
 }
 
 pub fn mp_dblsubfast(a: &[u64], b: &[u64], c: &mut [u64]) {
@@ -147,6 +182,37 @@ pub fn fp2mul_mont(a: &f2elm_t, b: &f2elm_t, c: &mut f2elm_t) {
     mp_addfast(&tt1[12..], &t1, &mut temp[12..]);
     tt1 = temp;
     crate::fp_generic::rdc_mont(&tt1, &mut c[0]);
+}
+
+pub fn fp2mul_montx(a: *const felm_t, b: *const felm_t, c: &mut f2elm_t) {
+    let mut t1 = [0u64; 12];
+    let mut t2 = [0u64; 12];
+    let mut tt1 = [0u64; 24];
+    let mut tt2 = [0u64; 24];
+    let mut tt3 = [0u64; 24];
+
+    unsafe {
+        mp_addfast(&*a, &*a.offset(1), &mut t1);
+        mp_addfast(&*b, &*b.offset(1), &mut t2);
+        crate::fp_generic::mp_mul(&*a, &*b, &mut tt1, 12);
+        crate::fp_generic::mp_mul(&*a.offset(1), &*b.offset(1), &mut tt2, 12);
+        crate::fp_generic::mp_mul(&t1, &t2, &mut tt3, 12);
+        mp_dblsubfast(&tt1, &tt2, &mut tt3);
+
+        let mut temp = tt1;
+        let mask = mp_subfast(&tt1, &tt2, &mut temp);
+        tt1 = temp;
+
+        for i in 0..12 as usize {
+            t1[i] = crate::p751[i] & mask;
+        }
+
+        crate::fp_generic::rdc_mont(&tt3, &mut c[1]);
+        let mut temp = tt1;
+        mp_addfast(&tt1[12..], &t1, &mut temp[12..]);
+        tt1 = temp;
+        crate::fp_generic::rdc_mont(&tt1, &mut c[0]);
+    }
 }
 
 pub fn fpinv_chain_mont(a: &mut felm_t) {
@@ -732,14 +798,9 @@ pub fn mp_shiftl1(x: &mut [u64], nwords: usize) {
 
 #[cfg(test)]
 pub mod tests {
-    pub type uint64_t = libc::c_ulong;
-    pub type digit_t = uint64_t;
-    type felm_t = [u64; 12];
-    type f2elm_t = [felm_t; 2];
-    type dfelm_t = [u64; 24];
-
     use crate::fp_generic::tests::*;
     use crate::util::fillbytes_u64;
+    use crate::*;
 
     #[test]
     fn test_fpx() {
